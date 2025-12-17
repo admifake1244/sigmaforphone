@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GTA 6 - Tốc Độ Cao & Tông Xe Gây Va Chạm NPC 3D (Phiên bản Mobile)</title>
+    <!-- Tải Tailwind CSS cho giao diện người dùng -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tải thư viện Three.js cho đồ họa 3D -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        /* CSS tùy chỉnh cho trò chơi và điều khiển di động */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827;
+            margin: 0;
+            overflow: hidden;
+            touch-action: none; /* Ngăn trình duyệt can thiệp vào các cử chỉ chạm */
+        }
+        canvas {
+            display: block;
+        }
+
+        /* --- Vùng điều khiển di động --- */
+        .mobile-controls {
+            position: fixed;
+            z-index: 100;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            pointer-events: none; /* Cho phép chạm xuyên qua các vùng trống */
+        }
+        
+        /* Cần điều khiển (Joystick) */
+        #joystick-area {
+            width: 150px;
+            height: 150px;
+            pointer-events: auto;
+        }
+
+        #joystick-base {
+            position: absolute;
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.2);
+            transform: translate(25px, 25px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #joystick-handle {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.6);
+            position: relative;
+            transform: translate(0, 0);
+        }
+
+        /* Nút hành động */
+        #action-area {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 10px;
+            pointer-events: auto;
+            min-width: 150px;
+        }
+
+        .action-button {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: white;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            transition: transform 0.1s;
+        }
+
+        .action-button:active {
+            transform: scale(0.95);
+        }
+        
+        /* Màu sắc cho các nút */
+        #run-button { background-color: #f59e0b; /* Cam */ }
+        #jump-button { background-color: #10b981; /* Xanh lá */ }
+        #shoot-button { background-color: #ef4444; /* Đỏ */ }
+        #interact-button { background-color: #3b82f6; /* Xanh dương */ }
+
+        /* Vùng xoay camera (nửa bên phải màn hình) */
+        #camera-rotate-area {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 50vw;
+            height: 100vh;
+            pointer-events: auto; /* Quan trọng: Cho phép bắt chạm */
+        }
+        
+        /* HUD Style */
+        .hud-info {
+            background-color: rgba(0, 0, 0, 0.8);
+            border: 1px solid #4b5563;
+        }
+
+        /* Ẩn HUD trên thiết bị di động để dành không gian cho điều khiển */
+        @media (max-width: 768px) {
+            .mobile-controls {
+                /* Giảm kích thước cần điều khiển trên màn hình nhỏ */
+                padding: 5px;
+            }
+            #joystick-area {
+                width: 120px;
+                height: 120px;
+            }
+            #joystick-base {
+                width: 80px;
+                height: 80px;
+                transform: translate(20px, 20px);
+            }
+            #joystick-handle {
+                width: 40px;
+                height: 40px;
+            }
+            .action-button {
+                width: 50px;
+                height: 50px;
+                font-size: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Giao diện người dùng (HUD và Điều khiển) -->
+    <div id="ui-container" class="absolute top-4 left-4 z-10 pointer-events-none">
+        <div class="hud-info p-3 rounded-lg shadow-2xl max-w-xs pointer-events-auto text-xs text-gray-200">
+            <h1 class="text-base font-bold text-red-500 mb-1">Mô Phỏng GTA 3D</h1>
+            
+            <div id="status-message" class="mt-2 p-1 bg-blue-900 bg-opacity-70 text-white rounded font-mono text-xs">
+                Trạng thái: ĐI BỘ
+            </div>
+            <div id="interaction-prompt" class="mt-1 p-1 bg-yellow-600 text-black text-center rounded hidden">
+                Nhấn [E] để lên xe.
+            </div>
+        </div>
+    </div>
+    
+    <!-- --- VÙNG ĐIỀU KHIỂN MOBILE --- -->
+    <div class="mobile-controls">
+        
+        <!-- Cần điều khiển (Bên trái) -->
+        <div id="joystick-area">
+            <div id="joystick-base">
+                <div id="joystick-handle"></div>
+            </div>
+        </div>
+
+        <!-- Vùng giữ chỗ giữa -->
+        <div class="flex-grow"></div> 
+
+        <!-- Nút hành động (Bên phải) -->
+        <div id="action-area">
+            <button id="shoot-button" class="action-button">BẮN</button>
+            <div class="flex gap-4">
+                <button id="run-button" class="action-button">CHẠY</button>
+                <button id="jump-button" class="action-button">NHẢY</button>
+                <button id="interact-button" class="action-button">E</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vùng xoay camera (Nửa bên phải màn hình) -->
+    <div id="camera-rotate-area"></div>
+    <!-- --- KẾT THÚC ĐIỀU KHIỂN MOBILE --- -->
+
+
+    <script>
+        // --- Cài đặt Three.js và Hằng số ---
+        let scene, camera, renderer;
+        let playerCharacter, car;
+        let keys = {};
+        let isDriving = false;
+
+        let staticObjects = []; 
+        let movingTraffic = []; 
+        let movingNPCs = []; 
+        
+        let raycaster;
+        let gunMesh;
+        
+        const MAP_SIZE = 400; 
+        const BULLET_DURATION = 100; 
+        
+        const PLAYER_SPEED = 0.1; 
+        const PLAYER_RUN_MULTIPLIER = 3.0; 
+        const PLAYER_ROTATION_SPEED = 0.05; 
+        
+        const GRAVITY = -0.05; 
+        const JUMP_FORCE = 0.4; 
+        
+        let yVelocity = 0; 
+        let isGrounded = true; 
+        const PLAYER_GROUND_Y = 0.6; 
+        
+        const CAR_ACCELERATION = 0.06; 
+        const CAR_ROTATION_SPEED = 0.03; 
+        const CAR_FRICTION = 0.96;
+        const MAX_CAR_SPEED = 0.8; 
+        
+        const ENTRY_DISTANCE = 3.0; 
+
+        const NPC_SPEED = 0.05; 
+        const TRAFFIC_SPEED_BASE = 0.15; 
+        
+        let playerVelocity = new THREE.Vector3();
+        let carVelocity = new THREE.Vector3();
+
+        // --- Biến Trạng thái Touch Control ---
+        let joystickTouchId = null;
+        let joystickCenter = { x: 0, y: 0 };
+        const joystickRadius = 50; // Bán kính joystick-base / 2
+        
+        let cameraTouchId = null;
+        let lastCameraX = 0;
+        const ROTATION_SENSITIVITY = 0.005; // Độ nhạy xoay
+
+        // --- Các phần tử DOM của Mobile ---
+        const joystickArea = document.getElementById('joystick-area');
+        const joystickHandle = document.getElementById('joystick-handle');
+        const cameraRotateArea = document.getElementById('camera-rotate-area');
+        const shootButton = document.getElementById('shoot-button');
+        const jumpButton = document.getElementById('jump-button');
+        const runButton = document.getElementById('run-button');
+        const interactButton = document.getElementById('interact-button');
+
+
+        // --- Hàm Khởi tạo ---
+        function init() {
+            // 1. Scene, Camera, Renderer
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x333344); 
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            
+            renderer.shadowMap.enabled = true; 
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+            
+            raycaster = new THREE.Raycaster();
+
+            // 2. Tạo các đối tượng
+            car = createCar(); 
+            playerCharacter = createPlayerCharacter(); 
+            
+            playerCharacter.position.set(-53, PLAYER_GROUND_Y, -50); 
+            car.position.set(-50, 0.25, -50); 
+
+            // 3. Xây dựng Bản đồ, Tòa nhà, Bãi biển và NPC/Traffic
+            createCityMap();
+
+            // 4. Ánh sáng
+            const ambientLight = new THREE.AmbientLight(0x404040, 5);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(200, 200, 200);
+            directionalLight.castShadow = true; 
+            
+            directionalLight.shadow.mapSize.width = 2048;  
+            directionalLight.shadow.mapSize.height = 2048; 
+            directionalLight.shadow.camera.near = 0.5;    
+            directionalLight.shadow.camera.far = 500;
+            directionalLight.shadow.camera.left = -300;
+            directionalLight.shadow.camera.right = 300;
+            directionalLight.shadow.camera.top = 300;
+            directionalLight.shadow.camera.bottom = -300;
+            
+            scene.add(directionalLight);
+            
+            // 5. Xử lý sự kiện
+            // Giữ lại keyboard cho desktop
+            window.addEventListener('keydown', onKeyDown);
+            window.addEventListener('keyup', onKeyUp);
+            window.addEventListener('resize', onWindowResize, false);
+            window.addEventListener('mousedown', onMouseDown, false); 
+            
+            // Xử lý sự kiện Touch
+            setupTouchControls();
+
+            // 6. Cài đặt camera ban đầu
+            updateCamera(playerCharacter);
+        }
+
+        // --- Hàm tạo đối tượng (Giữ nguyên từ mã trước) ---
+        function createCar() {
+            const carGeometry = new THREE.BoxGeometry(2, 0.5, 4);
+            const carMaterial = new THREE.MeshPhongMaterial({ color: 0xcc0000 }); 
+            const carMesh = new THREE.Mesh(carGeometry, carMaterial);
+            carMesh.position.y = 0.25;
+            carMesh.castShadow = true;
+            carMesh.receiveShadow = true;
+            carMesh.userData.isVehicle = true; 
+            scene.add(carMesh);
+            return carMesh;
+        }
+
+        function createPlayerCharacter() {
+            const headGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+            const headMaterial = new THREE.MeshPhongMaterial({ color: 0xf5c3a3 });
+            const head = new THREE.Mesh(headGeometry, headMaterial);
+            head.position.y = 1.6; 
+            head.castShadow = true;
+
+            const bodyGeometry = new THREE.BoxGeometry(1.0, 1.2, 1.0); 
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x00ff00 }); 
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.position.y = PLAYER_GROUND_Y; 
+            body.castShadow = true;
+
+            const gunGeometry = new THREE.BoxGeometry(0.1, 0.1, 0.5);
+            const gunMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
+            gunMesh = new THREE.Mesh(gunGeometry, gunMaterial);
+            gunMesh.position.set(0.5, 0.3, 0.5); 
+            gunMesh.castShadow = true;
+
+            const playerGroup = new THREE.Group();
+            playerGroup.add(body);
+            playerGroup.add(head); 
+            playerGroup.add(gunMesh);
+            playerGroup.rotation.order = 'YXZ'; 
+            playerGroup.userData.isPlayer = true; 
+            
+            scene.add(playerGroup);
+            return playerGroup;
+        }
+        
+        function getRandomNPCColor() {
+            let color;
+            do {
+                color = new THREE.Color(Math.random(), Math.random(), Math.random());
+                const luminance = 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
+                if (luminance > 0.2 && luminance < 0.8) {
+                    return color.getHex();
+                }
+            } while (true);
+        }
+
+        function createTrafficCar(color) {
+            const carGeometry = new THREE.BoxGeometry(2, 0.5, 4);
+            const carMaterial = new THREE.MeshPhongMaterial({ color: color });
+            const carMesh = new THREE.Mesh(carGeometry, carMaterial);
+            carMesh.position.y = 0.25;
+            carMesh.castShadow = true;
+            carMesh.receiveShadow = true;
+            carMesh.userData.isVehicle = true; 
+            carMesh.velocity = new THREE.Vector3(0, 0, 0); 
+            carMesh.aiState = { 
+                timer: 0, 
+                maxTime: Math.random() * 300 + 100,
+                isReversing: false, 
+                reverseTimer: 0 
+            };
+            scene.add(carMesh);
+            return carMesh;
+        }
+
+        function createMovingNPC(customColor) {
+            const bodyColor = customColor || getRandomNPCColor(); 
+            
+            const headGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+            const headMaterial = new THREE.MeshPhongMaterial({ color: 0xf5c3a3 }); 
+            const head = new THREE.Mesh(headGeometry, headMaterial);
+            head.position.y = 1.6; 
+            head.castShadow = true;
+
+            const bodyGeometry = new THREE.BoxGeometry(1.0, 1.2, 1.0); 
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: bodyColor }); 
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.position.y = PLAYER_GROUND_Y; 
+            body.castShadow = true;
+
+            const npcGroup = new THREE.Group();
+            npcGroup.add(body);
+            npcGroup.add(head); 
+            
+            npcGroup.userData.isNPC = true; 
+            npcGroup.velocity = new THREE.Vector3(0, 0, 0);
+            npcGroup.aiState = { 
+                walking: true, 
+                turnTimer: 0, 
+                turnInterval: Math.floor(Math.random() * 200) + 100 
+            };
+            
+            scene.add(npcGroup);
+            return npcGroup;
+        }
+
+        function createPalmTree() {
+            const tree = new THREE.Group();
+            const trunkGeometry = new THREE.CylinderGeometry(0.3, 0.5, 6, 8);
+            const trunkMaterial = new THREE.MeshPhongMaterial({ color: 0x8b4513 }); 
+            const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+            trunk.position.y = 3; 
+            trunk.castShadow = true;
+            tree.add(trunk);
+
+            const leavesGeometry = new THREE.ConeGeometry(3, 3, 8);
+            const leavesMaterial = new THREE.MeshPhongMaterial({ color: 0x228b22 }); 
+            const leaves = new THREE.Mesh(leavesGeometry, leavesMaterial);
+            leaves.position.y = 7;
+            leaves.castShadow = true;
+            tree.add(leaves);
+            
+            scene.add(tree);
+            return tree;
+        }
+
+        function createSunLounger(color) {
+            const lounger = new THREE.Group();
+            const frameGeometry = new THREE.BoxGeometry(0.5, 0.2, 3);
+            const frameMaterial = new THREE.MeshPhongMaterial({ color: 0xa0522d }); 
+            const frame = new THREE.Mesh(frameGeometry, frameMaterial);
+            frame.position.y = 0.1;
+            frame.castShadow = true;
+            lounger.add(frame);
+
+            const backGeometry = new THREE.BoxGeometry(0.5, 0.1, 1.5);
+            const backMaterial = new THREE.MeshPhongMaterial({ color: color });
+            const back = new THREE.Mesh(backGeometry, backMaterial);
+            back.position.set(0, 0.25, -0.75);
+            back.rotation.x = Math.PI / 6; 
+            back.castShadow = true;
+            lounger.add(back);
+            
+            const seatGeometry = new THREE.BoxGeometry(0.5, 0.1, 1.5);
+            const seatMaterial = new THREE.MeshPhongMaterial({ color: color });
+            const seat = new THREE.Mesh(seatGeometry, seatMaterial);
+            seat.position.set(0, 0.25, 0.75);
+            seat.castShadow = true;
+            lounger.add(seat);
+            
+            scene.add(lounger);
+            return lounger;
+        }
+
+        function createBeachUmbrella(color) {
+            const umbrella = new THREE.Group();
+            const poleGeometry = new THREE.CylinderGeometry(0.05, 0.05, 4, 16);
+            const poleMaterial = new THREE.MeshPhongMaterial({ color: 0xcccccc });
+            const pole = new THREE.Mesh(poleGeometry, poleMaterial);
+            pole.position.y = 2;
+            pole.castShadow = true;
+            umbrella.add(pole);
+
+            const canopyGeometry = new THREE.ConeGeometry(2, 0.5, 32);
+            const canopyMaterial = new THREE.MeshPhongMaterial({ color: color, side: THREE.DoubleSide });
+            const canopy = new THREE.Mesh(canopyGeometry, canopyMaterial);
+            canopy.rotation.x = Math.PI; 
+            canopy.position.y = 4 + 0.25; 
+            canopy.castShadow = true;
+            umbrella.add(canopy);
+            
+            scene.add(umbrella);
+            return umbrella;
+        }
+        
+        function createCityMap() {
+            const BEACH_SIZE = MAP_SIZE / 2; 
+            const BEACH_END = MAP_SIZE / 2; 
+
+            const roadGeometry = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE);
+            const roadMaterial = new THREE.MeshPhongMaterial({ color: 0x222222, side: THREE.DoubleSide });
+            const roads = new THREE.Mesh(roadGeometry, roadMaterial);
+            roads.rotation.x = Math.PI / 2;
+            roads.position.y = 0; 
+            roads.receiveShadow = true;
+            scene.add(roads);
+
+            const sandGeometry = new THREE.PlaneGeometry(BEACH_SIZE, BEACH_SIZE);
+            const sandMaterial = new THREE.MeshPhongMaterial({ color: 0xfcd34d, side: THREE.DoubleSide }); 
+            const sand = new THREE.Mesh(sandGeometry, sandMaterial);
+            sand.rotation.x = Math.PI / 2;
+            sand.position.set(MAP_SIZE / 4, 0.001, MAP_SIZE / 4); 
+            sand.receiveShadow = true;
+            scene.add(sand);
+
+            const oceanGeometry = new THREE.PlaneGeometry(MAP_SIZE * 2, MAP_SIZE * 2);
+            const oceanMaterial = new THREE.MeshPhongMaterial({ color: 0x0077be, opacity: 0.8, transparent: true, side: THREE.DoubleSide });
+            const ocean = new THREE.Mesh(oceanGeometry, oceanMaterial);
+            ocean.rotation.x = Math.PI / 2;
+            ocean.position.y = -0.3;
+            ocean.position.x = MAP_SIZE / 2;
+            ocean.position.z = MAP_SIZE / 2;
+            ocean.userData.isOcean = true; 
+            scene.add(ocean);
+            staticObjects.push(ocean); 
+
+            const NUM_BUILDINGS = 300; 
+            for (let i = 0; i < NUM_BUILDINGS; i++) {
+                const height = Math.random() * 10 + 3;
+                const size = Math.random() * 4 + 1.5;
+                const buildingGeometry = new THREE.BoxGeometry(size, height, size);
+                
+                const buildingColor = new THREE.Color(
+                    Math.random() * 0.4 + 0.2, 
+                    Math.random() * 0.4 + 0.2, 
+                    Math.random() * 0.4 + 0.2
+                );
+                const buildingMaterial = new THREE.MeshPhongMaterial({ color: buildingColor });
+                
+                const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+
+                let buildingX, buildingZ;
+                let isInsideBeach;
+
+                do {
+                    buildingX = (Math.random() - 0.5) * (MAP_SIZE - 20); 
+                    buildingZ = (Math.random() - 0.5) * (MAP_SIZE - 20);
+                    
+                    isInsideBeach = buildingX >= 0 && buildingX <= BEACH_END && 
+                                    buildingZ >= 0 && buildingZ <= BEACH_END;
+
+                } while (isInsideBeach); 
+
+                building.position.x = buildingX;
+                building.position.z = buildingZ;
+                building.position.y = height / 2;
+                building.userData.isBuilding = true; 
+                building.castShadow = true;
+                building.receiveShadow = true;
+
+                scene.add(building);
+                staticObjects.push(building); 
+            }
+            
+            const BEACH_OBJECT_COUNT = 50; 
+            for (let i = 0; i < BEACH_OBJECT_COUNT; i++) {
+                const type = Math.floor(Math.random() * 3); 
+
+                const x = Math.random() * (BEACH_SIZE - 10) + 5;
+                const z = Math.random() * (BEACH_SIZE - 10) + 5;
+
+                let object;
+                let yPos = 0.01; 
+                const randomColor = new THREE.Color(Math.random(), Math.random(), Math.random());
+
+                if (type === 0) {
+                    object = createPalmTree();
+                    object.userData.isTree = true;
+                } else if (type === 1) {
+                    object = createSunLounger(randomColor);
+                    object.rotation.y = Math.random() * Math.PI * 2; 
+                    object.userData.isLounger = true;
+                } else {
+                    object = createBeachUmbrella(randomColor);
+                    object.userData.isUmbrella = true;
+                }
+                
+                object.position.set(x, yPos, z);
+                staticObjects.push(object);
+            }
+
+            const NUM_TRAFFIC = 40; 
+            const NUM_NPCS = 80;    
+            
+            const tempCarGeometry = new THREE.BoxGeometry(2, 0.5, 4);
+            const tempCarMaterial = new THREE.MeshBasicMaterial();
+            const tempCarChecker = new THREE.Mesh(tempCarGeometry, tempCarMaterial);
+            const carSpawnBuffer = 1.0; 
+
+            for (let i = 0; i < NUM_TRAFFIC; i++) {
+                let carX, carZ;
+                let isInsideBeachOrBuilding;
+                
+                do {
+                    carX = (Math.random() - 0.5) * (MAP_SIZE - 40);
+                    carZ = (Math.random() - 0.5) * (MAP_SIZE - 40);
+                    
+                    let isInsideBeach = carX >= 0 && carZ >= 0 && carX <= BEACH_END && carZ <= BEACH_END;
+                    
+                    let isOverlappingBuilding = false;
+                    tempCarChecker.position.set(carX, 0.25, carZ); 
+                    tempCarChecker.updateMatrixWorld(true);
+                    const trafficSpawnBox = new THREE.Box3().setFromObject(tempCarChecker).expandByScalar(carSpawnBuffer); 
+
+                    for (const object of staticObjects) {
+                        if (object.userData.isBuilding) { 
+                            const objectBox = new THREE.Box3().setFromObject(object);
+                            if (trafficSpawnBox.intersectsBox(objectBox)) {
+                                isOverlappingBuilding = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    isInsideBeachOrBuilding = isInsideBeach || isOverlappingBuilding;
+
+                } while (isInsideBeachOrBuilding);
+
+                const trafficCar = createTrafficCar(0x0000ff); 
+                trafficCar.position.x = carX;
+                trafficCar.position.z = carZ;
+                trafficCar.rotation.y = Math.random() * Math.PI * 2;
+                movingTraffic.push(trafficCar);
+            }
+            
+            tempCarGeometry.dispose();
+            tempCarMaterial.dispose(); 
+
+
+            const BEACH_NPC_COUNT = Math.floor(NUM_NPCS * 0.7); 
+            const CITY_NPC_COUNT = NUM_NPCS - BEACH_NPC_COUNT; 
+            
+            for (let i = 0; i < BEACH_NPC_COUNT; i++) {
+                const npc = createMovingNPC(); 
+                npc.position.x = Math.random() * BEACH_END; 
+                npc.position.z = Math.random() * BEACH_END;
+                npc.rotation.y = Math.random() * Math.PI * 2;
+                movingNPCs.push(npc);
+            }
+
+            for (let i = 0; i < CITY_NPC_COUNT; i++) {
+                let npcX, npcZ;
+                let isInsideBeach;
+
+                do {
+                    npcX = (Math.random() - 0.5) * (MAP_SIZE - 40);
+                    npcZ = (Math.random() - 0.5) * (MAP_SIZE - 40);
+                    isInsideBeach = npcX >= 0 && npcX <= BEACH_END && npcZ >= 0 && npcZ <= BEACH_END;
+                } while (isInsideBeach);
+
+                const npc = createMovingNPC(); 
+                npc.position.x = npcX;
+                npc.position.z = npcZ;
+                npc.rotation.y = Math.random() * Math.PI * 2;
+                movingNPCs.push(npc);
+            }
+        }
+        
+        // --- Xử lý sự kiện bàn phím (Giữ lại cho Desktop) ---
+        function onKeyDown(event) {
+            keys[event.key.toLowerCase()] = true;
+
+            if (event.key.toLowerCase() === 'e') {
+                handleInteract();
+            }
+            
+            if (!isDriving && event.key.toLowerCase() === ' ') {
+                handleJump();
+            }
+        }
+
+        function onKeyUp(event) {
+            keys[event.key.toLowerCase()] = false;
+        }
+
+        function onMouseDown(event) {
+            if (event.button === 0) { // Chuột trái
+                handleShoot();
+            }
+        }
+        
+        // --- Hàm xử lý hành động ---
+
+        function handleInteract() {
+            if (isDriving) {
+                exitCar();
+            } else {
+                const distance = playerCharacter.position.distanceTo(car.position);
+                if (distance <= ENTRY_DISTANCE) {
+                    enterCar();
+                }
+            }
+        }
+
+        function handleJump() {
+            if (!isDriving && isGrounded) {
+                yVelocity = JUMP_FORCE;
+                isGrounded = false;
+            }
+        }
+        
+        function handleRunDown() {
+            keys['shift'] = true;
+        }
+
+        function handleRunUp() {
+            keys['shift'] = false;
+        }
+
+        function handleShoot() {
+            if (isDriving) return; 
+
+            const direction = new THREE.Vector3(0, 0, 1);
+            direction.applyQuaternion(playerCharacter.quaternion);
+
+            const origin = playerCharacter.position.clone();
+            origin.y += 1.5; 
+
+            raycaster.set(origin, direction);
+
+            const npcMeshes = movingNPCs.flatMap(npc => npc.children); 
+            const intersects = raycaster.intersectObjects(npcMeshes, true);
+
+            if (intersects.length > 0) {
+                const hitMesh = intersects[0].object;
+                let targetNPC = hitMesh.parent; 
+
+                if (targetNPC.userData.isNPC) {
+                    scene.remove(targetNPC);
+                    movingNPCs.splice(movingNPCs.indexOf(targetNPC), 1);
+                    console.log('NPC bị bắn và đã bị loại bỏ!');
+                }
+            }
+
+            const bulletGeometry = new THREE.BoxGeometry(0.1, 0.1, 50);
+            const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+            
+            bullet.position.copy(origin);
+            bullet.lookAt(origin.clone().add(direction));
+            bullet.translateZ(25); 
+            
+            scene.add(bullet);
+
+            setTimeout(() => {
+                scene.remove(bullet);
+            }, BULLET_DURATION); 
+        }
+
+        // --- Thiết lập Điều khiển Cảm ứng ---
+        function setupTouchControls() {
+            // Nút Hành động
+            interactButton.addEventListener('touchstart', (e) => { e.preventDefault(); handleInteract(); });
+            jumpButton.addEventListener('touchstart', (e) => { e.preventDefault(); handleJump(); });
+            shootButton.addEventListener('touchstart', (e) => { e.preventDefault(); handleShoot(); });
+            
+            runButton.addEventListener('touchstart', (e) => { e.preventDefault(); handleRunDown(); });
+            runButton.addEventListener('touchend', (e) => { e.preventDefault(); handleRunUp(); });
+            runButton.addEventListener('touchcancel', (e) => { e.preventDefault(); handleRunUp(); });
+
+
+            // 1. Joystick (Di chuyển/Lái xe)
+            joystickArea.addEventListener('touchstart', onJoystickStart, { passive: false });
+            joystickArea.addEventListener('touchmove', onJoystickMove, { passive: false });
+            joystickArea.addEventListener('touchend', onJoystickEnd);
+            joystickArea.addEventListener('touchcancel', onJoystickEnd);
+            
+            // Lấy tọa độ trung tâm của joystick sau khi layout
+            setTimeout(() => {
+                const rect = joystickArea.getBoundingClientRect();
+                joystickCenter = {
+                    x: rect.left + rect.width / 2,
+                    y: rect.top + rect.height / 2
+                };
+            }, 100);
+
+            // 2. Vùng xoay Camera (Look/Steer)
+            cameraRotateArea.addEventListener('touchstart', onCameraStart, { passive: false });
+            cameraRotateArea.addEventListener('touchmove', onCameraMove, { passive: false });
+            cameraRotateArea.addEventListener('touchend', onCameraEnd);
+            cameraRotateArea.addEventListener('touchcancel', onCameraEnd);
+        }
+
+        // --- Logic Joystick ---
+        function onJoystickStart(e) {
+            e.preventDefault();
+            if (joystickTouchId !== null) return;
+            
+            const touch = e.changedTouches[0];
+            joystickTouchId = touch.identifier;
+            
+            // Xóa trạng thái phím cũ
+            keys['w'] = keys['s'] = keys['a'] = keys['d'] = false;
+        }
+
+        function onJoystickMove(e) {
+            e.preventDefault();
+            if (joystickTouchId === null) return;
+
+            const touch = Array.from(e.changedTouches).find(t => t.identifier === joystickTouchId);
+            if (!touch) return;
+
+            const dx = touch.clientX - joystickCenter.x;
+            const dy = touch.clientY - joystickCenter.y;
+            
+            // Tính khoảng cách và góc
+            const distance = Math.min(Math.sqrt(dx * dx + dy * dy), joystickRadius);
+            const angle = Math.atan2(dy, dx);
+            
+            // Di chuyển cần điều khiển
+            const moveX = Math.cos(angle) * distance;
+            const moveY = Math.sin(angle) * distance;
+            
+            joystickHandle.style.transform = `translate(${moveX}px, ${moveY}px)`;
+            
+            // Ánh xạ thành phím (W/S và A/D)
+            const threshold = joystickRadius * 0.4;
+            
+            keys['w'] = dy < -threshold;
+            keys['s'] = dy > threshold;
+            
+            // A/D được sử dụng để xoay nhân vật hoặc lái xe
+            if (!isDriving) {
+                 // Khi đi bộ, A/D xoay
+                keys['a'] = dx < -threshold;
+                keys['d'] = dx > threshold;
+            } else {
+                 // Khi lái xe, A/D lái
+                keys['a'] = dx < -threshold;
+                keys['d'] = dx > threshold;
+            }
+        }
+
+        function onJoystickEnd(e) {
+            if (joystickTouchId === null) return;
+
+            // Kiểm tra xem touch kết thúc có phải là touch của joystick không
+            const touch = Array.from(e.changedTouches).find(t => t.identifier === joystickTouchId);
+            if (!touch) return;
+            
+            joystickTouchId = null;
+            
+            // Reset phím và tay cầm
+            keys['w'] = keys['s'] = keys['a'] = keys['d'] = false;
+            joystickHandle.style.transform = `translate(0, 0)`;
+        }
+
+        // --- Logic Xoay Camera (Kéo) ---
+        function onCameraStart(e) {
+            e.preventDefault();
+            if (cameraTouchId !== null) return;
+            
+            const touch = e.changedTouches[0];
+            cameraTouchId = touch.identifier;
+            lastCameraX = touch.clientX;
+        }
+
+        function onCameraMove(e) {
+            e.preventDefault();
+            if (cameraTouchId === null) return;
+
+            const touch = Array.from(e.changedTouches).find(t => t.identifier === cameraTouchId);
+            if (!touch) return;
+            
+            const deltaX = touch.clientX - lastCameraX;
+            
+            // Chỉ xoay khi đi bộ (khi lái xe, joystick X-axis điều khiển lái)
+            if (!isDriving) {
+                playerCharacter.rotation.y -= deltaX * ROTATION_SENSITIVITY;
+            } 
+            // Nếu đang lái xe, vùng này chỉ để kéo camera chứ không thay đổi hướng xe (Steering)
+            // Lái xe được điều khiển hoàn toàn bởi Joystick
+            
+            lastCameraX = touch.clientX;
+        }
+
+        function onCameraEnd(e) {
+            if (cameraTouchId === null) return;
+            
+            const touch = Array.from(e.changedTouches).find(t => t.identifier === cameraTouchId);
+            if (!touch) return;
+            
+            cameraTouchId = null;
+        }
+
+
+        // --- Logic Game và Cập nhật Chuyển động (Giữ nguyên) ---
+        function enterCar() {
+            isDriving = true;
+            playerCharacter.visible = false;
+            playerCharacter.position.copy(car.position); 
+
+            carVelocity.set(0, 0, 0);
+
+            document.getElementById('status-message').textContent = 'Trạng thái: LÁI XE';
+            document.getElementById('interaction-prompt').classList.add('hidden');
+        }
+
+        function exitCar() {
+            isDriving = false;
+            
+            const offset = new THREE.Vector3(-3, 0, 0); 
+            offset.applyQuaternion(car.quaternion); 
+            
+            playerCharacter.position.copy(car.position).add(offset);
+            playerCharacter.position.y = PLAYER_GROUND_Y; 
+            
+            yVelocity = 0;
+            isGrounded = true;
+
+            playerCharacter.visible = true;
+
+            carVelocity.set(0, 0, 0);
+
+            document.getElementById('status-message').textContent = 'Trạng thái: ĐI BỘ';
+        }
+
+        function removeNPC(npc) {
+            if (npc.userData.isNPC) {
+                scene.remove(npc);
+                const index = movingNPCs.indexOf(npc);
+                if (index > -1) {
+                    movingNPCs.splice(index, 1);
+                    console.log('NPC bị tông/bắn và đã bị loại bỏ!');
+                }
+            }
+        }
+        
+        function updateMovingNPCs() {
+            const allCollidables = [...staticObjects, ...movingTraffic, car]; 
+            
+            movingNPCs.forEach(npc => {
+                if (npc.position.y < PLAYER_GROUND_Y) npc.position.y = PLAYER_GROUND_Y; 
+
+                const direction = new THREE.Vector3(0, 0, 1);
+                direction.applyQuaternion(npc.quaternion);
+                
+                const step = direction.multiplyScalar(NPC_SPEED);
+                
+                let collisionDetected = false;
+                
+                const npcCollisionBox = new THREE.Box3();
+                const tempNPC = npc.clone(); 
+                const NPC_COLLISION_SIZE = new THREE.Vector3(1.2, 1.2, 1.2); 
+
+                const checkCollision = (futurePosition) => {
+                    tempNPC.position.copy(futurePosition);
+                    tempNPC.updateMatrixWorld(true);
+
+                    npcCollisionBox.setFromCenterAndSize(
+                        futurePosition.clone().setY(PLAYER_GROUND_Y), 
+                        NPC_COLLISION_SIZE 
+                    ); 
+                    
+                    for (const object of allCollidables) {
+                        if (object === npc || object.userData.isPlayer) continue; 
+
+                        let objectBox = new THREE.Box3();
+                        
+                        if (object.userData.isVehicle) {
+                            objectBox.setFromObject(object);
+                            if (npcCollisionBox.intersectsBox(objectBox)) {
+                                removeNPC(npc);
+                                return true; 
+                            }
+                        } 
+                        else {
+                            objectBox.setFromObject(object);
+                            if (object.geometry && object.geometry.type === 'PlaneGeometry') continue; 
+                            
+                            if (npcCollisionBox.intersectsBox(objectBox)) {
+                                return true; 
+                            }
+                        }
+                    }
+                    return false; 
+                };
+
+
+                let futurePosition = npc.position.clone();
+                futurePosition.add(step);
+
+                if (checkCollision(futurePosition)) {
+                    collisionDetected = true;
+                }
+                
+                if (collisionDetected) {
+                    npc.rotation.y += Math.PI; 
+                    npc.aiState.turnTimer = 0; 
+                } else {
+                    npc.position.copy(futurePosition);
+                }
+
+                npc.aiState.turnTimer++;
+                
+                if (npc.aiState.turnTimer > npc.aiState.turnInterval) {
+                    const rotationAmount = (Math.random() - 0.5) * 0.5; 
+                    npc.rotation.y += rotationAmount;
+                    npc.aiState.turnTimer = 0;
+                    npc.aiState.turnInterval = Math.floor(Math.random() * 200) + 100;
+                }
+            });
+        }
+
+        function updateMovingTraffic() {
+            const allStaticAndPlayerCar = [...staticObjects, car]; 
+            
+            movingTraffic.forEach(trafficCar => {
+                if (trafficCar.aiState.isReversing) {
+                    if (trafficCar.aiState.reverseTimer > 0) {
+                        trafficCar.translateZ(-TRAFFIC_SPEED_BASE * 0.5); 
+                        trafficCar.aiState.reverseTimer--;
+                    } else {
+                        trafficCar.aiState.isReversing = false;
+                        const turnAmount = Math.random() > 0.5 ? Math.PI / 2 : -Math.PI / 2;
+                        trafficCar.rotation.y += turnAmount; 
+                        trafficCar.aiState.timer = 0; 
+                    }
+                    return; 
+                }
+
+                const direction = new THREE.Vector3(0, 0, 1);
+                direction.applyQuaternion(trafficCar.quaternion);
+                
+                let futurePosition = trafficCar.position.clone().add(direction.multiplyScalar(TRAFFIC_SPEED_BASE));
+                
+                let collisionDetected = false;
+                
+                const tempCar = trafficCar.clone();
+                tempCar.position.copy(futurePosition);
+                tempCar.updateMatrixWorld(true);
+                const trafficFutureBox = new THREE.Box3().setFromObject(tempCar).expandByScalar(0.2);
+
+                for (let i = 0; i < movingNPCs.length; i++) {
+                    const npc = movingNPCs[i];
+                    const npcBody = npc.children.find(child => child.geometry.type === 'BoxGeometry'); 
+                    const npcBox = new THREE.Box3().setFromObject(npcBody).expandByVector(new THREE.Vector3(0.1, 0.1, 0.1));
+                    
+                    if (trafficFutureBox.intersectsBox(npcBox)) {
+                        removeNPC(npc); 
+                    }
+                }
+
+                for (const object of allStaticAndPlayerCar) {
+                    if (object === trafficCar) continue; 
+
+                    const objectBox = new THREE.Box3().setFromObject(object);
+
+                    if (trafficFutureBox.intersectsBox(objectBox)) {
+                        collisionDetected = true;
+                        break;
+                    }
+                }
+                
+                if (collisionDetected) {
+                    trafficCar.aiState.isReversing = true;
+                    trafficCar.aiState.reverseTimer = 30; 
+                    trafficCar.aiState.timer = 0; 
+                } else {
+                    trafficCar.position.copy(futurePosition);
+
+                    trafficCar.aiState.timer++;
+                    if (trafficCar.aiState.timer > trafficCar.aiState.maxTime) {
+                        const turnDirection = Math.random() > 0.5 ? Math.PI / 2 : -Math.PI / 2;
+                        trafficCar.rotation.y += turnDirection;
+                        trafficCar.aiState.timer = 0;
+                        trafficCar.aiState.maxTime = Math.random() * 300 + 100; 
+                    }
+                }
+            });
+        }
+
+        function checkCarCollision(futurePosition, futureQuaternion) {
+            const carBox = new THREE.Box3();
+            const tempCar = car.clone();
+            tempCar.position.copy(futurePosition);
+            tempCar.quaternion.copy(futureQuaternion);
+            tempCar.updateMatrixWorld(true);
+            const playerCarFutureBox = new THREE.Box3().setFromObject(tempCar).expandByScalar(0.1);
+
+            const allObstacles = [...staticObjects, ...movingTraffic]; 
+
+            for (let i = 0; i < movingNPCs.length; i++) {
+                const npc = movingNPCs[i];
+                const npcBody = npc.children.find(child => child.geometry.type === 'BoxGeometry'); 
+                const npcBox = new THREE.Box3().setFromObject(npcBody).expandByVector(new THREE.Vector3(0.1, 0.1, 0.1));
+                
+                if (playerCarFutureBox.intersectsBox(npcBox)) {
+                    removeNPC(npc); 
+                }
+            }
+
+            for (let i = 0; i < allObstacles.length; i++) {
+                const object = allObstacles[i];
+                if (object === car) continue; 
+
+                const objectBox = new THREE.Box3().setFromObject(object);
+
+                if (playerCarFutureBox.intersectsBox(objectBox)) {
+                    return object;
+                }
+            }
+            return null;
+        }
+
+
+        function updateMovement() {
+            if (isDriving) {
+                updateCarMovement();
+                updateCamera(car);
+                gunMesh.visible = false; 
+            } else {
+                updatePlayerMovement();
+                updateCamera(playerCharacter);
+                gunMesh.visible = true; 
+            }
+        }
+
+        function updatePlayerMovement() {
+            let speed = PLAYER_SPEED;
+            if (keys['shift']) {
+                speed *= PLAYER_RUN_MULTIPLIER;
+            }
+
+            // Xoay chỉ do touch control (nửa phải) hoặc A/D phím
+            const rotationSpeed = PLAYER_ROTATION_SPEED;
+            if (keys['a'] && !isDriving) {
+                playerCharacter.rotation.y += rotationSpeed; 
+            }
+            if (keys['d'] && !isDriving) {
+                playerCharacter.rotation.y -= rotationSpeed; 
+            }
+            
+            let currentPosition = playerCharacter.position.clone();
+            const moveDirection = new THREE.Vector3();
+
+            if (keys['w']) {
+                moveDirection.z += speed;
+            }
+            if (keys['s']) {
+                moveDirection.z -= speed;
+            }
+
+            moveDirection.applyQuaternion(playerCharacter.quaternion);
+
+            let futureXPosition = currentPosition.clone();
+            futureXPosition.x += moveDirection.x;
+
+            if (!checkStaticCollisionForPlayer(futureXPosition)) {
+                playerCharacter.position.x = futureXPosition.x;
+            } 
+            
+            let futureZPosition = playerCharacter.position.clone(); 
+            futureZPosition.z += moveDirection.z;
+
+            if (!checkStaticCollisionForPlayer(futureZPosition)) {
+                playerCharacter.position.z = futureZPosition.z;
+            } 
+
+            if (!isGrounded) {
+                yVelocity += GRAVITY; 
+            }
+
+            let futureYPosition = playerCharacter.position.y + yVelocity;
+
+            if (futureYPosition <= PLAYER_GROUND_Y) { 
+                futureYPosition = PLAYER_GROUND_Y; 
+                if (!isGrounded) {
+                    isGrounded = true;
+                    yVelocity = 0;
+                }
+            } else {
+                 isGrounded = false; 
+            }
+
+            playerCharacter.position.y = futureYPosition;
+            
+            const distance = playerCharacter.position.distanceTo(car.position);
+            const prompt = document.getElementById('interaction-prompt');
+            const statusMessage = document.getElementById('status-message');
+
+            if (distance <= ENTRY_DISTANCE) {
+                prompt.classList.remove('hidden');
+            } else {
+                prompt.classList.add('hidden');
+            }
+            
+            statusMessage.textContent = isDriving ? 'Trạng thái: LÁI XE' : 
+                                       (isGrounded ? (keys['shift'] ? 'Trạng thái: CHẠY' : 'Trạng thái: ĐI BỘ') : 'Trạng thái: NHẢY / RƠI');
+
+        }
+
+        function checkStaticCollisionForPlayer(futurePosition) {
+            const playerCollisionBox = new THREE.Box3().setFromCenterAndSize(
+                futurePosition.clone().setY(playerCharacter.position.y), 
+                new THREE.Vector3(1.2, 1.2, 1.2) 
+            ); 
+            
+            for (const object of staticObjects) {
+                let objectBox = new THREE.Box3();
+                
+                if (object.geometry && object.geometry.type === 'PlaneGeometry') continue; 
+
+                if (object.geometry) {
+                    objectBox.setFromObject(object);
+                } else if (object.children.length > 0) {
+                    objectBox.setFromObject(object);
+                } else {
+                    continue; 
+                }
+                
+                if (playerCollisionBox.intersectsBox(objectBox)) {
+                    return true; 
+                }
+            }
+            return false;
+        }
+
+        function updateCarMovement() {
+            let nextRotationY = car.rotation.y;
+            
+            // Xoay xe bằng joystick A/D
+            if (keys['a']) {
+                nextRotationY += CAR_ROTATION_SPEED;
+            }
+            if (keys['d']) {
+                nextRotationY -= CAR_ROTATION_SPEED;
+            }
+
+            let direction = new THREE.Vector3(0, 0, 1);
+            const tempQuaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), nextRotationY);
+            direction.applyQuaternion(tempQuaternion);
+
+            let newCarVelocity = carVelocity.clone();
+            // Tăng tốc/Phanh bằng joystick W/S
+            if (keys['w']) {
+                newCarVelocity.add(direction.multiplyScalar(CAR_ACCELERATION));
+            } else if (keys['s']) {
+                newCarVelocity.add(direction.multiplyScalar(-CAR_ACCELERATION / 2));
+            }
+
+            newCarVelocity.multiplyScalar(CAR_FRICTION);
+            if (newCarVelocity.length() > MAX_CAR_SPEED) {
+                newCarVelocity.normalize().multiplyScalar(MAX_CAR_SPEED);
+            }
+            
+            let futurePosition = car.position.clone().add(newCarVelocity);
+
+            const collisionObject = checkCarCollision(futurePosition, tempQuaternion);
+
+            if (collisionObject) {
+                carVelocity.multiplyScalar(-0.5); 
+                car.position.copy(car.position); 
+            } else {
+                car.rotation.y = nextRotationY;
+                car.position.copy(futurePosition);
+                carVelocity.copy(newCarVelocity);
+            }
+            
+            playerCharacter.position.copy(car.position);
+        }
+
+        function updateCamera(target) {
+            const relativeCameraOffset = new THREE.Vector3(0, 5, -8); 
+            const cameraOffset = relativeCameraOffset.applyMatrix4(target.matrixWorld);
+
+            camera.position.lerp(cameraOffset, 0.15); 
+            camera.lookAt(target.position);
+        }
+
+        // --- Game Loop (Vòng lặp hoạt hình) ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            updateMovement();
+            updateMovingNPCs(); 
+            updateMovingTraffic(); 
+            
+            renderer.render(scene, camera);
+        }
+
+        // --- Xử lý thay đổi kích thước cửa sổ ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            
+            // Cập nhật lại trung tâm joystick khi thay đổi kích thước
+            const rect = joystickArea.getBoundingClientRect();
+            joystickCenter = {
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2
+            };
+        }
+
+        // --- Khởi động Game ---
+        window.onload = function () {
+            init();
+            animate();
+        };
+
+    </script>
+</body>
+</html>
